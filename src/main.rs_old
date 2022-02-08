@@ -1,0 +1,132 @@
+use v4l::buffer::{Type, Metadata};
+use v4l::io::mmap::Stream;
+use v4l::io::traits::CaptureStream;
+use v4l::prelude::*;
+use v4l::video::Capture;
+use v4l::Device;
+use v4l::FourCC;
+use ndarray::{Array, Array2, Axis};
+use image::GrayImage;
+// use std::{thread, time::Duration, time::Instant};
+use chrono::Local;
+use std::fs::File;
+use std::io;
+use serde::Deserialize;
+
+
+//onst WIDTH: u32 = 640;
+//const HEIGHT: u32 = 480;
+//const DIFF_THRESHOLD: f64 = 20.0;
+//const FRAME_THRESHOLD: u32 = 30;
+
+#[derive(Debug, Deserialize)]
+struct Settings {
+    width: u32,
+    height: u32,
+    device_no: usize,
+    output_dir: String,
+    threshold: f64,
+    frame_diff_div: u32
+}
+
+fn get_photo_mmap() -> io::Result<()> {
+    let path = "/dev/video2";
+    let mut dev = Device::with_path(path)?;
+    let mut stream = MmapStream::with_buffers(&mut dev, Type::VideoCapture, 1)?;
+
+    let (buf, meta) = stream.next()?;
+    Ok(())
+}
+
+fn get_photo(device_no: usize, width: u32, height: u32) -> Array2<u8> {
+    let mut dev = Device::new(device_no).expect("Device not found!");
+
+    let format = dev.format().unwrap();
+    let params = dev.params().unwrap();
+    println!("Active format:\n{}", format);
+    println!("Active parameters:\n{}", params);
+
+    for format in dev.enum_formats().unwrap() {
+        println!("  {} ({})", format.fourcc, format.description);
+
+        for framesize in dev.enum_framesizes(format.fourcc).unwrap() {
+            for discrete in framesize.size.to_discrete() {
+                println!("    Size: {}", discrete);
+            }
+        }
+    }
+    // let mut fmt = dev.format().unwrap();
+    // fmt.width = width;
+    // fmt.height = height;
+    // fmt.fourcc = FourCC::new(b"JPEG");
+
+    // let params = dev.params().unwrap();
+    // println!("{:?}",params);
+
+    //dev.set_format(&fmt).expect("Cannot apply format settings to the device!");
+    
+    let mut stream = Stream::with_buffers(& mut dev, Type::VideoCapture, 1).expect("Failed to create a stream!");
+
+    //println!("{:?}", fmt);
+    //let r: io::Result<(&[u8], &Metadata)> = stream.next();
+    let r = stream.next();
+    match r {
+        Err(error) => println!("{}", error),
+        _ => println!("")
+    };
+
+    let (buf, _) = stream.next().unwrap();
+    let raw_array = Array::from_shape_vec((height as usize,width as usize,2), buf.to_vec()).unwrap();
+    let base_img_arr = raw_array.index_axis(Axis(2), 0).to_owned();
+    return base_img_arr
+}
+
+fn v_blur(arr: &Array2<u8>) -> Vec<f64> {
+    let mut v = Vec::<f64>::new();
+    for x in 1..arr.shape()[0]-1 {
+        for y in 1..arr.shape()[1]-1 {
+            v.push(
+                arr[[x-1,y]] as f64/5.0 +
+                arr[[x+1,y]] as f64/5.0 +
+                arr[[x,y-1]] as f64/5.0 +
+                arr[[x,y+1]] as f64/5.0 +
+                arr[[x,y]] as f64/5.0
+            )
+        }
+    }
+
+    return v
+}
+
+fn main() {
+    let file = File::open("settings.json").expect("Settings file not found!");
+    let reader = io::BufReader::new(file);
+
+    let settings: Settings = serde_json::from_reader(reader).expect("Settings cannot be parsed!");
+    println!("{:?}", settings);
+
+    let tr = settings.width * settings.height / settings.frame_diff_div;
+    let first_arr = get_photo_mmap().unwrap();
+    // let mut last = v_blur(&first_arr);
+    // println!("Starting loop.");
+    // return;
+
+    // loop {
+    //     let arr = get_photo(settings.device_no, settings.width, settings.height);
+    //     let cur = v_blur(&arr);
+    //     let mut sum: u32 = 0;
+    //     for i in 0..last.len() {
+    //         if (last[i]-cur[i]).abs() > settings.threshold { sum += 1 }
+    //     }
+
+    //     last = cur;
+    //     println!("Sum: {:?}", sum);
+    //     if sum > tr {
+    //         println!("Movement detected.");
+    //         let v = arr.into_raw_vec();
+    //         let img = GrayImage::from_raw(settings.width, settings.height, v).expect("Cannot convert buffer to image!s");
+    //         img.save(format!("{}output_{:?}.png", settings.output_dir, Local::now())).expect("Cannot save image file!");
+    //         println!("Image saved.");
+    //     }
+    // }
+}

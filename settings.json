@@ -1,0 +1,15 @@
+{
+    "width": 1280,
+    "height": 720,
+    "device": "/dev/video0",
+    "dev_id": "",
+    "format": "MJPG",
+    "output_dir": "/tmp/",
+    "threshold": 50,
+    "frame_diff_div": 50,
+    "delay": 1000,
+    "timeout": 2500,
+    "debug": true,
+    "down_ratio": 4,
+    "interval": [1, 30]
+}
