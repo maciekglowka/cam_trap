@@ -164,6 +164,10 @@ fn sobel(input: &Vec<u8>, width: u32, height: u32, kernels: &Vec<Kernel<i16>>, t
     return v
 }
 
+fn vec_diff(v0: &Vec<u8>, v1: &Vec<u8>) -> Vec<u8> {
+    v0.iter().zip(v1).map(|(a,b)| if a>b {a-b} else {b-a}).collect()
+}
+
 
 
 fn operate_camera(tx: tokio::sync::mpsc::Sender<Vec<u8>>, settings: Settings) {
@@ -237,7 +241,7 @@ async fn main() {
     let dw = settings.width/settings.down_ratio;
     let dh = settings.height/settings.down_ratio;
 
-    let frame_thresh = (dw * dh / settings.frame_diff_div) as i16;
+    let frame_thresh = dw * dh / settings.frame_diff_div;
     if settings.debug {println!("Thresh sum: {}", frame_thresh)};
 
     loop {
@@ -246,27 +250,28 @@ async fn main() {
             let buf = result.unwrap();
             if settings.debug {println!("Received {} from the camera thread", buf.len())};
             let gray = to_grayscale(&buf);
-            // let blurred = blur(&gray, settings.width, settings.height);
             let blurred = blur_down(&gray, settings.width, settings.height, settings.down_ratio, settings.lowpass);
-            let cur = sobel(&blurred, dw, dh, &kernels, settings.threshold);
+            
+            let diff = vec_diff(&blurred, &last);
+            
+            let edges = sobel(&diff, dw, dh, &kernels, settings.threshold);
 
-
-            // let img = GrayImage::from_raw(dw, dh, blurred).unwrap();
+            // let img = GrayImage::from_raw(dw, dh, edges).unwrap();
             // let path = format!("{}output_gray_{}.png", settings.output_dir, Local::now().format("%Y%m%d_%H_%M_%S"));
             // img.save(path).expect("Cannot save image file!");
             // break;
 
-            let mut sum = 0;
-            let mut diff = Vec::new();
+            let sum = edges.iter().fold(0, |acc, a| acc + *a as u32) / 255;
+            //let mut diff = Vec::new();
 
-            for idx in 0..cur.len() {
-                if cur[idx] != last[idx] {
-                    sum+=1;
-                    diff.push(255)
-                } else {
-                    diff.push(0)
-                }
-            }
+            // for idx in 0..cur.len() {
+            //     if cur[idx] != last[idx] {
+            //         sum+=1;
+            //         diff.push(255)
+            //     } else {
+            //         diff.push(0)
+            //     }
+            // }
             if sum > frame_thresh {
                 println!("Movement detected. {}", sum);
                 let img = RgbImage::from_raw(settings.width, settings.height, buf).expect("Can't create RGB image!");
@@ -284,7 +289,7 @@ async fn main() {
                 // img.save(path).expect("Cannot save image file!");
             }
 
-            last = cur;
+            last = blurred;
             if settings.debug {
                 println!("Frame calculation took: {}ms", (time::Instant::now() - start_time).as_millis());
             }
