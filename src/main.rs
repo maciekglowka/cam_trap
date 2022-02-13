@@ -19,6 +19,7 @@ struct Settings {
     format: String,
     output_dir: String,
     threshold: i16,
+    lowpass: u8,
     frame_diff_div: u32,
     delay: u64,
     debug: bool,
@@ -62,9 +63,37 @@ fn decode_jpeg(frame: rscam::Frame) -> Vec::<u8> {
     return buffer
 }
 
-fn blur_down(input: &Vec<u8>, width: u32, height: u32, ratio: u32) -> Vec::<u8> {
+fn yuv_to_rgb(y: isize, u: isize, v: isize) -> Vec::<u8> {
+    let tr = y + (351 * (v-128)) / 256;
+    let tg = y - (179 * (v-128) + 86 * (u-128)) / 256;
+    let tb = y + (443 * (u-128)) / 256;
+    let r = min(255, max(tr, 0)) as u8;
+    let g = min(255, max(tg, 0)) as u8;
+    let b = min(255, max(tb, 0)) as u8;
+    vec!(r,g,b)
+}
+
+fn decode_yuyv(frame: rscam::Frame) -> Vec::<u8> {
+    let buf = &*frame;
+    let mut out = Vec::<u8>::new();
+
+    for x in 0..buf.len()/4 {
+        let i = 4*x;
+        let y0 = buf[i] as isize;
+        let u = buf[i+1] as isize;
+        let y1 = buf[i+2] as isize;
+        let v =  buf[i+3] as isize;
+
+        out.append(&mut yuv_to_rgb(y0, u, v));
+        out.append(&mut yuv_to_rgb(y1, u, v));
+    }
+    out
+}
+
+fn blur_down(input: &Vec<u8>, width: u32, height: u32, ratio: u32, lowpass: u8) -> Vec::<u8> {
     let mut v = Vec::<u8>::new();
     let pixels = Pixels::<u8>::new(width as usize, height as usize, input);
+    let r2 = max(1,ratio / 2) as isize;
 
     for y in 0..height/ratio {
         for x in 0..width/ratio {
@@ -72,13 +101,13 @@ fn blur_down(input: &Vec<u8>, width: u32, height: u32, ratio: u32) -> Vec::<u8> 
             let mut count: f32 = 0.0;
             let px = (x*ratio) as isize;
             let py = (y*ratio) as isize;
-            for wy in max(0,py-1)..min(height as isize, py+1) {
-                for wx in max(0,px-1)..min(width as isize, px+1) {
+            for wy in max(0,py-r2)..min(height as isize, py+r2) {
+                for wx in max(0,px-r2)..min(width as isize, px+r2) {
                     count += 1.0;
                     value += pixels.get(wx as usize,wy as usize) as f32;
                 }
             }
-            v.push((value / count) as u8);
+            v.push(min(lowpass, (value / count) as u8));
         }
     }
     v
@@ -154,10 +183,21 @@ fn operate_camera(tx: tokio::sync::mpsc::Sender<Vec<u8>>, settings: Settings) {
     let delay = time::Duration::from_millis(settings.delay);
 
     loop {
+        let start_time = time::Instant::now();
         let frame = camera.capture().expect("Can't access frame!");
-        let v = decode_jpeg(frame);
-        tx.blocking_send(v);
-        thread::sleep(delay);
+
+        let v;
+        if settings.format == "YUYV" { v=decode_yuyv(frame)} else {v = decode_jpeg(frame)};
+        let elapsed = time::Instant::now() - start_time;
+
+        if settings.debug {
+            println!("Frame capture took: {}ms", elapsed.as_millis());
+        }
+        tx.blocking_send(v).expect("Sendind frame to async thread failed!");
+        
+        if elapsed < delay {
+            thread::sleep(delay - elapsed);
+        }
     }
 }
 
@@ -202,12 +242,19 @@ async fn main() {
 
     loop {
         if let Ok(result) = tokio::time::timeout(duration, rx.recv()).await {
+            let start_time = time::Instant::now();
             let buf = result.unwrap();
             if settings.debug {println!("Received {} from the camera thread", buf.len())};
             let gray = to_grayscale(&buf);
             // let blurred = blur(&gray, settings.width, settings.height);
-            let blurred = blur_down(&gray, settings.width, settings.height, settings.down_ratio);
+            let blurred = blur_down(&gray, settings.width, settings.height, settings.down_ratio, settings.lowpass);
             let cur = sobel(&blurred, dw, dh, &kernels, settings.threshold);
+
+
+            // let img = GrayImage::from_raw(dw, dh, blurred).unwrap();
+            // let path = format!("{}output_gray_{}.png", settings.output_dir, Local::now().format("%Y%m%d_%H_%M_%S"));
+            // img.save(path).expect("Cannot save image file!");
+            // break;
 
             let mut sum = 0;
             let mut diff = Vec::new();
@@ -223,7 +270,7 @@ async fn main() {
             if sum > frame_thresh {
                 println!("Movement detected. {}", sum);
                 let img = RgbImage::from_raw(settings.width, settings.height, buf).expect("Can't create RGB image!");
-                let path = format!("{}output_{}.png", settings.output_dir, Local::now().format("%Y%m%d_%H_%M_%S"));
+                let path = format!("{}output_{}_{}.jpg", settings.output_dir, Local::now().format("%Y%m%d_%H_%M_%S"), sum);
                 if settings.debug {println!("Saving to: {}", path)};
                 img.save(path).expect("Cannot save image file!");
 
@@ -233,11 +280,14 @@ async fn main() {
             } else if settings.debug {
                 println!("No movement. {}", sum);
                 // let img = GrayImage::from_raw(dw, dh, diff).unwrap();
-                // let path = format!("{}output_sobel.png", settings.output_dir);
+                // let path = format!("{}output_gray_{}_{}.png", settings.output_dir, Local::now().format("%Y%m%d_%H_%M_%S"), sum);
                 // img.save(path).expect("Cannot save image file!");
             }
 
             last = cur;
+            if settings.debug {
+                println!("Frame calculation took: {}ms", (time::Instant::now() - start_time).as_millis());
+            }
         } else {
             println!("Timed out");
             camera_reset(&settings.dev_id);
