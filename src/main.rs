@@ -8,7 +8,7 @@ use image::{GrayImage, RgbImage};
 use serde::Deserialize;
 use chrono::Local;
 use std::{time, thread};
-use jpeg_decoder::Decoder;
+// use jpeg_decoder::Decoder;
 
 #[derive(Clone, Debug, Deserialize)]
 struct Settings {
@@ -19,7 +19,6 @@ struct Settings {
     format: String,
     output_dir: String,
     threshold: i16,
-    lowpass: u8,
     frame_diff_div: u32,
     delay: u64,
     debug: bool,
@@ -56,26 +55,29 @@ impl<T: std::marker::Copy> Kernel<T> {
 const k0: Kernel::<i16> = Kernel::<i16>{data: [-1,0,1,-2,0,2,-1,0,1]};
 const k1: Kernel::<i16> = Kernel::<i16>{data: [1,2,1,0,0,0,-1,-2,-1]};
 
-fn decode_jpeg(frame: rscam::Frame) -> Vec::<u8> {
-    let mut decoder = Decoder::new(&*frame);
-    let buffer = decoder.decode().expect("Can't decode jpeg!");
+// fn decode_jpeg(frame: &[u8]) -> Vec::<u8> {
+//     let mut decoder = Decoder::new(frame);
+//     let buffer = decoder.decode().expect("Can't decode jpeg!");
 
-    return buffer
-}
+//     return buffer
+// }
 
-fn yuv_to_rgb(y: isize, u: isize, v: isize) -> Vec::<u8> {
-    let tr = y + (351 * (v-128)) / 256;
-    let tg = y - (179 * (v-128) + 86 * (u-128)) / 256;
-    let tb = y + (443 * (u-128)) / 256;
-    let r = min(255, max(tr, 0)) as u8;
-    let g = min(255, max(tg, 0)) as u8;
-    let b = min(255, max(tb, 0)) as u8;
-    vec!(r,g,b)
-}
 
-fn decode_yuyv(frame: rscam::Frame) -> Vec::<u8> {
-    let buf = &*frame;
+fn grayscale_from_yuyv(buf: &[u8]) -> Vec::<u8> {
     let mut out = Vec::<u8>::new();
+    out.reserve_exact(buf.len()/2);
+
+    for x in 0..(buf.len()/2) as usize {
+        out.push(buf[x*2]);
+    }
+    out
+}
+
+
+fn decode_yuyv(buf: &[u8]) -> Vec::<u8> {
+    // let buf = &*frame;
+    let mut out = Vec::<u8>::new();
+    out.reserve_exact(buf.len()*6/4);
 
     for x in 0..buf.len()/4 {
         let i = 4*x;
@@ -84,14 +86,75 @@ fn decode_yuyv(frame: rscam::Frame) -> Vec::<u8> {
         let y1 = buf[i+2] as isize;
         let v =  buf[i+3] as isize;
 
-        out.append(&mut yuv_to_rgb(y0, u, v));
-        out.append(&mut yuv_to_rgb(y1, u, v));
+        let r_comp = (351 * (v-128)) >> 8;
+        let g_comp = (179 * (v-128) + 86 * (u-128)) >> 8;
+        let b_comp = (443 * (u-128)) >> 8;
+
+        let r0 = min(255, max(0, y0 + r_comp)) as u8;
+        let g0 = min(255, max(0, y0 - g_comp)) as u8;
+        let b0 = min(255, max(0, y0 + b_comp)) as u8;
+
+        let r1 = min(255, max(0, y1 + r_comp)) as u8;
+        let g1 = min(255, max(0, y1 - g_comp)) as u8;
+        let b1 = min(255, max(0, y1 + b_comp)) as u8;
+
+        // let r0 = min(255, y0 + r_comp) as u8;
+        // let g0 = max(0, y0 - g_comp) as u8;
+        // let b0 = min(255, y0 + b_comp) as u8;
+
+        // let r1 = min(255, y1 + r_comp) as u8;
+        // let g1 = max(0, y1 - g_comp) as u8;
+        // let b1 = min(255, y1 + b_comp) as u8;
+        // let r0 = (y0 + r_comp) as u8;
+        // let g0 = (y0 - g_comp) as u8;
+        // let b0 = (y0 + b_comp) as u8;
+
+        // let r1 = (y1 + r_comp) as u8;
+        // let g1 = (y1 - g_comp) as u8;
+        // let b1 = (y1 + b_comp) as u8;
+
+        out.push(r0);
+        out.push(g0);
+        out.push(b0);
+
+        out.push(r1);
+        out.push(g1);
+        out.push(b1);
     }
+
     out
 }
 
-fn blur_down(input: &Vec<u8>, width: u32, height: u32, ratio: u32, lowpass: u8) -> Vec::<u8> {
+// fn yuv_to_rgb(y: isize, u: isize, v: isize) -> Vec::<u8> {
+//     let tr = y + (351 * (v-128)) / 256;
+//     let tg = y - (179 * (v-128) + 86 * (u-128)) / 256;
+//     let tb = y + (443 * (u-128)) / 256;
+//     let r = min(255, max(tr, 0)) as u8;
+//     let g = min(255, max(tg, 0)) as u8;
+//     let b = min(255, max(tb, 0)) as u8;
+//     vec!(r,g,b)
+// }
+
+// fn decode_yuyv(frame: rscam::Frame) -> Vec::<u8> {
+//     let buf = &*frame;
+//     let mut out = Vec::<u8>::new();
+
+//     for x in 0..buf.len()/4 {
+//         let i = 4*x;
+//         let y0 = buf[i] as isize;
+//         let u = buf[i+1] as isize;
+//         let y1 = buf[i+2] as isize;
+//         let v =  buf[i+3] as isize;
+
+//         out.append(&mut yuv_to_rgb(y0, u, v));
+//         out.append(&mut yuv_to_rgb(y1, u, v));
+//     }
+//     out
+// }
+
+fn blur_down(input: &Vec<u8>, width: u32, height: u32, ratio: u32) -> Vec::<u8> {
     let mut v = Vec::<u8>::new();
+    v.reserve_exact((height / ratio * width / ratio) as usize);
     let pixels = Pixels::<u8>::new(width as usize, height as usize, input);
     let r2 = max(1,ratio / 2) as isize;
 
@@ -104,24 +167,24 @@ fn blur_down(input: &Vec<u8>, width: u32, height: u32, ratio: u32, lowpass: u8) 
             for wy in max(0,py-r2)..min(height as isize, py+r2) {
                 for wx in max(0,px-r2)..min(width as isize, px+r2) {
                     count += 1.0;
-                    value += pixels.get(wx as usize,wy as usize) as f32;
+                    value += pixels.get(wx as usize, wy as usize) as f32;
                 }
             }
-            v.push(min(lowpass, (value / count) as u8));
+            v.push((value / count) as u8);
         }
     }
     v
 }
 
-fn to_grayscale(input: &Vec<u8>) -> Vec<u8> {
-    let mut gray = vec![0; input.len()/3];
-    let mut idx = 0;
-    while idx<input.len() {
-        gray[idx/3] = input[idx]/3+input[idx+1]/3+input[idx+2]/3;
-        idx += 3;
-    };
-    return gray
-}
+// fn to_grayscale(input: &Vec<u8>) -> Vec<u8> {
+//     let mut gray = vec![0; input.len()/3];
+//     let mut idx = 0;
+//     while idx<input.len() {
+//         gray[idx/3] = input[idx]/3+input[idx+1]/3+input[idx+2]/3;
+//         idx += 3;
+//     };
+//     return gray
+// }
 
 // fn blur(input: &Vec<u8>, width: u32, height: u32) -> Vec::<u8> {
 //     let mut v = Vec::<u8>::new();
@@ -145,6 +208,7 @@ fn to_grayscale(input: &Vec<u8>) -> Vec<u8> {
 
 fn sobel(input: &Vec<u8>, width: u32, height: u32, kernels: &Vec<Kernel<i16>>, threshold: i16) -> Vec::<u8> {
     let mut v = Vec::<u8>::new();
+    v.reserve_exact((width * height) as usize);
     let pixels = Pixels::<u8>::new(width as usize, height as usize, input);
 
     for y in 0..height as isize{
@@ -170,7 +234,7 @@ fn vec_diff(v0: &Vec<u8>, v1: &Vec<u8>) -> Vec<u8> {
 
 
 
-fn operate_camera(tx: tokio::sync::mpsc::Sender<Vec<u8>>, settings: Settings) {
+fn operate_camera(tx: tokio::sync::mpsc::Sender<rscam::Frame>, settings: Settings) {
     let mut camera = Camera::new(&settings.device).unwrap();
     if settings.format == "JPEG" {
         camera.set_control(CID_JPEG_COMPRESSION_QUALITY, &95).expect("Camera setting failed!");
@@ -190,14 +254,21 @@ fn operate_camera(tx: tokio::sync::mpsc::Sender<Vec<u8>>, settings: Settings) {
         let start_time = time::Instant::now();
         let frame = camera.capture().expect("Can't access frame!");
 
-        let v;
-        if settings.format == "YUYV" { v=decode_yuyv(frame)} else {v = decode_jpeg(frame)};
+        // let v;
+        // let gray;
+        // if settings.format == "YUYV" { 
+        //     v=decode_yuyv(frame);
+        //     gray = to_grayscale(&v);
+        // } else {
+        //     v = decode_jpeg(frame);
+        //     gray = to_grayscale(&v);
+        // };
         let elapsed = time::Instant::now() - start_time;
 
-        if settings.debug {
-            println!("Frame capture took: {}ms", elapsed.as_millis());
-        }
-        tx.blocking_send(v).expect("Sendind frame to async thread failed!");
+        // if settings.debug {
+        //     println!("Frame capture took: {}ms", elapsed.as_millis());
+        // }
+        tx.blocking_send(frame); //expect("Sendind frame to async thread failed!");
         
         if elapsed < delay {
             thread::sleep(delay - elapsed);
@@ -249,32 +320,30 @@ async fn main() {
             let start_time = time::Instant::now();
             let buf = result.unwrap();
             if settings.debug {println!("Received {} from the camera thread", buf.len())};
-            let gray = to_grayscale(&buf);
-            let blurred = blur_down(&gray, settings.width, settings.height, settings.down_ratio, settings.lowpass);
+
+            //let mut rgb;
+            let gray=grayscale_from_yuyv(&*buf);
+            // if settings.format == "YUYV" { 
+            //     // rgb=decode_yuyv(&*buf);
+            //     gray = grayscale_from_yuyv(&*buf);
+            // } else {
+            //     rgb = decode_jpeg(&*buf);
+            //     gray = to_grayscale(&rgb);
+            // };
+
+            // let gray = to_grayscale(&buf);
+            let blurred = blur_down(&gray, settings.width, settings.height, settings.down_ratio);
             
             let diff = vec_diff(&blurred, &last);
             
             let edges = sobel(&diff, dw, dh, &kernels, settings.threshold);
 
-            // let img = GrayImage::from_raw(dw, dh, edges).unwrap();
-            // let path = format!("{}output_gray_{}.png", settings.output_dir, Local::now().format("%Y%m%d_%H_%M_%S"));
-            // img.save(path).expect("Cannot save image file!");
-            // break;
-
             let sum = edges.iter().fold(0, |acc, a| acc + *a as u32) / 255;
-            //let mut diff = Vec::new();
 
-            // for idx in 0..cur.len() {
-            //     if cur[idx] != last[idx] {
-            //         sum+=1;
-            //         diff.push(255)
-            //     } else {
-            //         diff.push(0)
-            //     }
-            // }
             if sum > frame_thresh {
                 println!("Movement detected. {}", sum);
-                let img = RgbImage::from_raw(settings.width, settings.height, buf).expect("Can't create RGB image!");
+                let rgb = decode_yuyv(&*buf);
+                let img = RgbImage::from_raw(settings.width, settings.height, rgb).expect("Can't create RGB image!");
                 let path = format!("{}output_{}_{}.jpg", settings.output_dir, Local::now().format("%Y%m%d_%H_%M_%S"), sum);
                 if settings.debug {println!("Saving to: {}", path)};
                 img.save(path).expect("Cannot save image file!");
