@@ -1,0 +1,2 @@
+docker run --rm -v cargo_cache:/usr/local/cargo -v `pwd`:/app -it rust-pi cargo build --target=armv7-unknown-linux-gnueabihf --release --bin trap_service
+scp target/armv7-unknown-linux-gnueabihf/release/trap_service pi@192.168.100.102:/home/pi/trap
