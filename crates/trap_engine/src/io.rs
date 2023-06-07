@@ -18,7 +18,9 @@ pub fn read_image(path: &str) -> Result<Vec<u8>, Box<dyn Error>> {
     Ok(buf)
 }
 
-pub fn save_image<P: Pixel<Subpixel = u8> + image::PixelWithColorType> (path: &str, buf: Vec<u8>, w: u32, h: u32) -> Result<(), image::ImageError> {
-    let img: ImageBuffer<P, _> = ImageBuffer::from_raw(w, h, buf).unwrap();
-    img.save(path)
+pub fn save_image<P: Pixel<Subpixel = u8> + image::PixelWithColorType> (path: &str, buf: Vec<u8>, w: u32, h: u32) -> Result<(), Box<dyn Error>> {
+    println!("RGB len: {}", buf.len());
+    let img: ImageBuffer<P, _> = ImageBuffer::from_raw(w, h, buf).ok_or("RGB buffer error")?;
+    img.save(path)?;
+    Ok(())
 }

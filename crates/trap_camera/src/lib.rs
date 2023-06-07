@@ -21,7 +21,6 @@ impl Camera {
     }
     pub fn start(&mut self) {
         self.camera.open_stream();
-        println!("{:?}", self.camera.frame_format());
     }
     pub fn capture(&mut self) -> Option<Vec<u8>> {
         let raw = self.camera.frame_raw().ok()?;

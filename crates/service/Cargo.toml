@@ -8,3 +8,7 @@ edition = "2021"
 [dependencies]
 trap_camera = { path = "../trap_camera" }
 trap_engine = { path = "../trap_engine" }
+
+chrono = "0.4"
+serde = { version = "1.0", features = ["derive"] }
+toml = "0.7"
