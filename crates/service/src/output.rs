@@ -24,7 +24,7 @@ pub fn output_loop(
 ) {
     loop {
         if let Ok(new_frame) = rx.recv() {
-            let now: chrono::DateTime<chrono::Utc> = SystemTime::now().into();
+            let now: chrono::DateTime<chrono::Local> = SystemTime::now().into();
             let dt_str = now.format("%Y%m%d-%H%M%S-%f");
             let file_path = format!("{}/{}.jpg", path, dt_str);
             save_rgb(&new_frame, width, height, &file_path);

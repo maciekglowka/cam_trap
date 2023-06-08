@@ -1,0 +1,57 @@
+<html>
+    <head>
+        <style>
+            #header {
+                width: 100%;
+                text-align: right;
+            }
+            #container {
+                width: 95vw;
+            }
+            #image-grid {
+                width: 100%;
+                column-width:200px;
+                column-gap: 8px;
+            };
+            .image-container {
+                width: 100%;
+            }
+            .image-container img {
+                width: 100%;
+                height: auto;
+            }
+            #nav {
+                width: 100%;
+                font-size: 2em;
+                text-align: center;
+            }
+            #nav a {
+                text-decoration: none;
+            }
+        </style>
+    </head>
+    <body>
+        <div id="header">
+            <a href="/logout">Logout</a>
+        </div>
+        <div id="container">
+            <div id="image-grid">
+                {% for path in paths %}
+                    <div class="image-container">
+                        <a href="/media/{{ path }}">
+                            <img src="/media/{{ path }}" />
+                        </a>
+                    </div>
+                {% endfor %}
+            </div>
+            <div id="nav">
+                {% if prev.is_some() %}
+                <a href="/?offset={{ prev.unwrap() }}">&larr;</a>
+                {% endif %}
+                {% if next.is_some() %}
+                <a href="/?offset={{ next.unwrap() }}">&rarr;</a>
+                {% endif %}
+            </div>
+        </div>
+    </body>
+</html>

@@ -1,7 +1,8 @@
+use chrono;
 use std::{
     sync::mpsc,
     thread,
-    time::Instant
+    time::SystemTime
 };
 
 use trap_engine::detect::{Pixels, PixelType};
@@ -11,6 +12,7 @@ mod config;
 mod output;
 
 const SETTINGS_PATH: &str = "settings.toml";
+const DEBUG: bool = true;
 
 fn main() {
     let settings = config::load_settings(SETTINGS_PATH);
@@ -39,7 +41,7 @@ fn main() {
 
     loop {
         if let Ok(new_frame) = camera_rx.recv() {
-            println!("Received {} bytes", new_frame.len());
+            // log(&format!("Received {} bytes", new_frame.len()));
             let new_blurred = trap_engine::detect::blur_down(
                 &Pixels::<u8>::new(settings.camera.width as usize, &new_frame, pixel_type),
                 settings.camera.width,
@@ -54,19 +56,18 @@ fn main() {
                     settings.camera.height / settings.downsample_ratio - (settings.downsample_ratio / 2),
                     settings.sobel_thresh
                 );
-                println!("Sum: {}", sum);
+                if sum > 0 {log(&format!("Sum: {}", sum))};
                 if sum >= settings.edge_thresh {
                     file_tx.try_send(new_frame);
-                    // thread::spawn(move || {
-                    //     output::save_rgb(
-                    //         &new_frame,
-                    //         settings.camera.width,
-                    //         settings.camera.height
-                    //     );
-                    // });
                 }
             }
             last_frame = Some(new_blurred);
         }
     }
+}
+
+fn log(msg: &str) {
+    if !DEBUG { return };
+    let now: chrono::DateTime<chrono::Local> = SystemTime::now().into();
+    println!("{}-{}", now, msg);
 }

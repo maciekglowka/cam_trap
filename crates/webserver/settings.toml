@@ -1,0 +1,4 @@
+media_dir = "/home/maciek/dev/cam_trap/media"
+port = 3000
+img_per_page = 2
+password = "1234"
